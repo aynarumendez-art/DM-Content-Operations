@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Loader2 } from 'lucide-react'
+import { Loader2, AlertCircle } from 'lucide-react'
 
 const AGENTS = [
   { number: 1, name: 'Ingestor de Marca' },
@@ -21,9 +21,13 @@ const AGENTS = [
   { number: 10, name: 'Entrega al Cliente' },
 ]
 
-interface Client {
+interface ClientWithPlan {
   id: string
   name: string
+  brand: string | null
+  status: string
+  plan_name: string | null
+  plan_price: number | null
 }
 
 interface Props {
@@ -33,9 +37,8 @@ interface Props {
 }
 
 export function SeaNewCycleDialog({ open, onOpenChange, onCreated }: Props) {
-  const [clients, setClients] = useState<Client[]>([])
-  const [clientId, setClientId] = useState('')
-  const [clientName, setClientName] = useState('')
+  const [clients, setClients] = useState<ClientWithPlan[]>([])
+  const [selectedClient, setSelectedClient] = useState<ClientWithPlan | null>(null)
   const [cycleMonth, setCycleMonth] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -47,27 +50,53 @@ export function SeaNewCycleDialog({ open, onOpenChange, onCreated }: Props) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    supabase.from('clients').select('id, name').order('name').then(({ data }) => {
-      setClients(data ?? [])
-    })
-  }, [])
+    if (!open) return
+    supabase
+      .from('clients')
+      .select(`
+        id, name, brand, status,
+        contracted_plans ( plan_name, monthly_price )
+      `)
+      .in('status', ['Activo', 'Pendiente de pago'])
+      .order('name')
+      .then(({ data }) => {
+        const mapped = (data ?? []).map((c: Record<string, unknown>) => {
+          const plans = (c.contracted_plans as { plan_name: string; monthly_price: number }[] | null) ?? []
+          const plan = plans[0] ?? null
+          return {
+            id: c.id as string,
+            name: c.name as string,
+            brand: c.brand as string | null,
+            status: c.status as string,
+            plan_name: plan?.plan_name ?? null,
+            plan_price: plan?.monthly_price ?? null,
+          }
+        })
+        setClients(mapped)
+      })
+  }, [open])
+
+  function reset() {
+    setSelectedClient(null)
+    setDriveFolderUrl('')
+    setDriveFolderId('')
+    setNotes('')
+    setError('')
+  }
 
   async function handleCreate() {
-    if (!clientName.trim()) { setError('El nombre del cliente es obligatorio'); return }
+    if (!selectedClient) { setError('Selecciona un cliente activo'); return }
     if (!cycleMonth) { setError('Selecciona el mes del ciclo'); return }
     setSaving(true)
     setError('')
 
     try {
-      const monthDate = cycleMonth + '-01'
-
-      // Create cycle
       const { data: cycle, error: cycleErr } = await supabase
         .from('sea_cycles')
         .insert({
-          client_id: clientId || null,
-          client_name: clientName.trim(),
-          cycle_month: monthDate,
+          client_id: selectedClient.id,
+          client_name: selectedClient.name,
+          cycle_month: cycleMonth + '-01',
           drive_folder_id: driveFolderId || null,
           drive_folder_url: driveFolderUrl || null,
           notes: notes || null,
@@ -77,19 +106,18 @@ export function SeaNewCycleDialog({ open, onOpenChange, onCreated }: Props) {
 
       if (cycleErr || !cycle) throw cycleErr ?? new Error('No se pudo crear el ciclo')
 
-      // Create 10 agent run stubs
-      const runs = AGENTS.map(a => ({
-        cycle_id: cycle.id,
-        agent_number: a.number,
-        agent_name: a.name,
-        status: 'Pendiente',
-      }))
-      await supabase.from('sea_agent_runs').insert(runs)
+      await supabase.from('sea_agent_runs').insert(
+        AGENTS.map(a => ({
+          cycle_id: cycle.id,
+          agent_number: a.number,
+          agent_name: a.name,
+          status: 'Pendiente',
+        }))
+      )
 
+      reset()
       onCreated()
       onOpenChange(false)
-      // reset
-      setClientId(''); setClientName(''); setDriveFolderUrl(''); setDriveFolderId(''); setNotes('')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al crear ciclo')
     } finally {
@@ -98,48 +126,65 @@ export function SeaNewCycleDialog({ open, onOpenChange, onCreated }: Props) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v) }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Nuevo ciclo SEA</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Client selector */}
+          {/* Client selector — required, active clients only */}
           <div className="space-y-1.5">
-            <Label>Cliente</Label>
+            <Label>
+              Cliente <span className="text-red-400">*</span>
+            </Label>
             <select
               className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              value={clientId}
+              value={selectedClient?.id ?? ''}
               onChange={e => {
-                const id = e.target.value
-                setClientId(id)
-                if (id) {
-                  const found = clients.find(c => c.id === id)
-                  if (found) setClientName(found.name)
-                } else {
-                  setClientName('')
-                }
+                const found = clients.find(c => c.id === e.target.value) ?? null
+                setSelectedClient(found)
               }}
             >
-              <option value="">— Seleccionar cliente existente —</option>
+              <option value="">— Seleccionar cliente activo —</option>
               {clients.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.brand ? ` · ${c.brand}` : ''}
+                </option>
               ))}
             </select>
+            {clients.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                Solo aparecen clientes con estado Activo o Pendiente de pago.
+              </p>
+            )}
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Nombre del cliente <span className="text-muted-foreground text-xs">(o ingresa manual)</span></Label>
-            <Input
-              value={clientName}
-              onChange={e => setClientName(e.target.value)}
-              placeholder="Ej: BMI"
-            />
-          </div>
+          {/* Plan info — auto-filled, read-only */}
+          {selectedClient && (
+            <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-1">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Plan contratado</p>
+              {selectedClient.plan_name ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-foreground">{selectedClient.plan_name}</span>
+                  {selectedClient.plan_price && (
+                    <span className="text-sm font-semibold text-primary">
+                      ${selectedClient.plan_price.toLocaleString()} USD/mes
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-yellow-400 text-xs">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Este cliente no tiene un plan registrado aún.
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">Estado: {selectedClient.status}</p>
+            </div>
+          )}
 
           <div className="space-y-1.5">
-            <Label>Mes del ciclo</Label>
+            <Label>Mes del ciclo <span className="text-red-400">*</span></Label>
             <Input
               type="month"
               value={cycleMonth}
@@ -170,7 +215,7 @@ export function SeaNewCycleDialog({ open, onOpenChange, onCreated }: Props) {
             <Input
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="Primer ciclo, plan Avanzado..."
+              placeholder="Primer ciclo, contexto especial..."
             />
           </div>
 
@@ -178,10 +223,10 @@ export function SeaNewCycleDialog({ open, onOpenChange, onCreated }: Props) {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button variant="outline" onClick={() => { reset(); onOpenChange(false) }} disabled={saving}>
             Cancelar
           </Button>
-          <Button onClick={handleCreate} disabled={saving} className="bg-primary hover:bg-primary/90 text-white">
+          <Button onClick={handleCreate} disabled={saving || !selectedClient} className="bg-primary hover:bg-primary/90 text-white">
             {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creando...</> : 'Crear ciclo'}
           </Button>
         </DialogFooter>
