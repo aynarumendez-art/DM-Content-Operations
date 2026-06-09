@@ -14,6 +14,7 @@ import {
   PackagePlus,
   UserCog,
   Wallet,
+  Zap,
 } from 'lucide-react'
 
 const nav = [
@@ -27,6 +28,10 @@ const nav = [
   { label: 'Extras', href: '/extras', icon: PackagePlus },
   { label: 'Equipo', href: '/equipo', icon: UserCog },
   { label: 'Pagos internos', href: '/pagos-internos', icon: Wallet },
+]
+
+const seaNav = [
+  { label: 'SEA · Pipeline', href: '/sea', icon: Zap },
 ]
 
 export function Sidebar() {
@@ -58,6 +63,30 @@ export function Sidebar() {
             </Link>
           )
         })}
+
+        <div className="pt-3 pb-1">
+          <p className="px-3 text-[10px] font-semibold tracking-widest uppercase text-muted-foreground/50 mb-1.5">
+            Agentes
+          </p>
+          {seaNav.map(({ label, href, icon: Icon }) => {
+            const active = pathname === href || pathname.startsWith(href + '/')
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                  active
+                    ? 'bg-primary text-primary-foreground font-medium'
+                    : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                )}
+              >
+                <Icon size={15} />
+                {label}
+              </Link>
+            )
+          })}
+        </div>
       </nav>
 
       <div className="px-5 py-4 border-t border-sidebar-border">

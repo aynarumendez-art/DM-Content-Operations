@@ -195,6 +195,38 @@ export interface InternalPayment {
   team_members?: { name: string; role: string | null }
 }
 
+export type SeaAgentStatus = 'Pendiente' | 'En ejecución' | 'Esperando aprobación' | 'Aprobado' | 'Rechazado' | 'Omitido'
+export type SeaCycleStatus = 'En progreso' | 'Completado' | 'Pausado' | 'Cancelado'
+
+export interface SeaCycle {
+  id: string
+  client_id: string | null
+  client_name: string
+  cycle_month: string
+  status: SeaCycleStatus
+  drive_folder_id: string | null
+  drive_folder_url: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SeaAgentRun {
+  id: string
+  cycle_id: string
+  agent_number: number
+  agent_name: string
+  status: SeaAgentStatus
+  output_drive_url: string | null
+  output_summary: string | null
+  executed_at: string | null
+  approved_at: string | null
+  approved_by: string | null
+  rejection_notes: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface DashboardMetrics {
   active_clients: number
   paused_clients: number
